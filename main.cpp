@@ -43,30 +43,52 @@ public:
     void receiveData(int sourceId, int value)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        std::cout << sourceId << " S " << value << "\n";
         signalQueues[sourceId].push(value);
 
         tg.run([this, sourceId, value] {
+            std::string buf;
+            std::stringstream ss(buf);
+            ss << "TASK " << sourceId << " -- " << (busyIds[sourceId].load() ? "B" : "N") << " -- " << value << "\n";
             bool isBusy = false;
             while (!busyIds[sourceId].compare_exchange_strong(isBusy, true))
             {
                 isBusy = false;
             }
+            ss << "SET TRUE ON " << sourceId << " -- " << isBusy << "\n";
             int nextValue;
             while (signalQueues[sourceId].try_pop(nextValue))
             {
+                ss << "START " << sourceId << " -- " << nextValue << "\n";
                 processData(sourceId, nextValue);
+                ss << "DONE " << sourceId << " -- " << nextValue << "\n";
             }
+            // ...
             isBusy = true;
             while (!busyIds[sourceId].compare_exchange_strong(isBusy, false))
             {
                 isBusy = true;
             }
+            ss << "SET FALSE ON " << sourceId << " -- " << isBusy << "\n";
+            LogType::accessor a;
+            logs.insert(a, std::this_thread::get_id());
+            auto thisLog = ss.str();
+            a->second.push_back(thisLog);
         });
     }
 
     void dumpLogs()
     {
         tg.wait();
+        for(auto l : logs)
+        {
+            int i = 0;
+            std::cout << "THREAD " << l.first << "\n";
+            for (auto v : l.second)
+            {
+                std::cout << i << " -- " << v << "\n";
+            }
+        }
 
         std::cout << " ---\n";
 
